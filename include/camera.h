@@ -10,7 +10,9 @@ public:
     void update(float dt);
 
     glm::vec3 getPos();
+    glm::mat4 getViewMat();
 private:
     glm::vec3 pos;
+    glm::vec3 rotation;
     InputHandler* handler;
 };

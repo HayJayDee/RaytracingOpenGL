@@ -8,6 +8,11 @@
 #include <glm/gtx/transform.hpp>
 #include "camera.h"
 #include "inputhandler.h"
+#include <glm/gtc/type_ptr.hpp>
+#include "scene.h"
+#include "sceneobject.h"
+#include "objectrenderer.h"
+#include "error.h"
 
 static float aspect;
 
@@ -15,52 +20,28 @@ void framebufferSizeCallback(GLFWwindow* window, int width, int height) {
     aspect = (float)width/(float)height;
 }
 
-void checkCompileErrors(unsigned int shader, std::string type)
-{
-	int success;
-	char infoLog[1024];
-	if (type != "PROGRAM")
-	{
-		glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-		if (!success)
-		{
-			glGetShaderInfoLog(shader, 1024, NULL, infoLog);
-			std::cout << "ERROR::SHADER_COMPILATION_ERROR of type: " << type << "\n" << infoLog << "\n -- --------------------------------------------------- -- " << std::endl;
-			exit(1);
-		}
-	}
-	else
-	{
-		glGetProgramiv(shader, GL_LINK_STATUS, &success);
-		if (!success)
-		{
-			glGetProgramInfoLog(shader, 1024, NULL, infoLog);
-			std::cout << "ERROR::PROGRAM_LINKING_ERROR of type: " << type << "\n" << infoLog << "\n -- --------------------------------------------------- -- " << std::endl;
-			exit(1);
-		}
-	}
+void errorCallback(int code, const char* msg) {
+    std::cout << msg << std::endl;
 }
 
-std::string readFile(const std::string& fileName) {
-    std::ifstream file(fileName, std::ios::binary);
-
-    if(!file.is_open()){
-        std::cerr << "Could not find file " << fileName << std::endl;
-        return "";
-    }
-    
-    std::stringstream ss;
-    ss << file.rdbuf();
-
-    file.close();
-    return ss.str();
+void GLAPIENTRY MessageCallback( GLenum source,
+                 GLenum type,
+                 GLuint id,
+                 GLenum severity,
+                 GLsizei length,
+                 const GLchar* message,
+                 const void* userParam )
+{
+    std::cout << message << std::endl;
 }
 
 int main(int argc, char** argv){
     glfwInit();
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwSetErrorCallback(errorCallback);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, true);
 
     GLFWwindow* window = glfwCreateWindow(800, 600, "OpenGL Raytracing", nullptr, nullptr);
     if(window == nullptr) {
@@ -69,8 +50,7 @@ int main(int argc, char** argv){
         return 1;
     }
     aspect = 800.0f/600.0f;
-    //glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
-    
+    glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
     glfwMakeContextCurrent(window);
     glfwSwapInterval(0);
 
@@ -79,6 +59,8 @@ int main(int argc, char** argv){
         glfwTerminate();
         return 1;
     }
+
+    InputHandler handler(window);
 
 	float quadVertices[] = 
 	{
@@ -102,38 +84,27 @@ int main(int argc, char** argv){
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+    GL_ERROR(glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float))));
     glBindVertexArray(0);
+    
+    SphereObject sphere0({0.0f,0.0f,-2.0f}, {1.0f,0.0f,0.0f}, 0.5f);
+    SphereObject sphere1({0.0f,1.0f,-1.0f}, {0.0f,1.0f,0.0f}, 0.25f);
+    SphereObject sphere2({1.0f,1.0f,0.0f}, {0.0f,0.0f,1.0f}, 1.0f);
 
-    std::string vertexSource = readFile("../shaders/shader.vert");
-    std::string fragmentSource = readFile("../shaders/shader.frag");
+    Scene scene;
+    scene.addSceneObject(&sphere0);
+    scene.addSceneObject(&sphere1);
+    scene.addSceneObject(&sphere2);
 
-    const char* vs = vertexSource.c_str();
-    const char* fs = fragmentSource.c_str();
+    Shader shader("../shaders/shader.vert", "../shaders/shader.frag");
 
-    // Create Shaders
-    uint32_t program = glCreateProgram();
-    uint32_t vertex = glCreateShader(GL_VERTEX_SHADER);
-    uint32_t fragment = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(vertex, 1, &vs, NULL);
-    glCompileShader(vertex);
-    checkCompileErrors(vertex, "VERTEX");
-    glShaderSource(fragment, 1, &fs, NULL);
-    glCompileShader(fragment);
-    checkCompileErrors(fragment, "FRAGMENT");
-    glAttachShader(program, vertex);
-    glAttachShader(program, fragment);
-    glLinkProgram(program);
-    checkCompileErrors(program, "PROGRAM");
-    glDeleteShader(vertex);
-    glDeleteShader(fragment);
-
-    InputHandler handler(window);
+    ObjectRenderer renderer(&scene, &shader);
 
     Camera cam(&handler, glm::vec3(0.0,0.0,0.0));
 
-    uint32_t locationAspect = glGetUniformLocation(program, "aspectRatio");
-    uint32_t locationCamPos = glGetUniformLocation(program, "camPos");
+    uint32_t locationAspect = shader.getUniform("aspectRatio");
+    uint32_t locationCamPos = shader.getUniform("camPos");
+    uint32_t locationView = shader.getUniform("viewMat");
     
     glClearColor(1.0, 0.0, 0.0, 1.0);
     double currTime = glfwGetTime();
@@ -143,11 +114,11 @@ int main(int argc, char** argv){
         glfwPollEvents();
         cam.update(delta);
         glClear(GL_COLOR_BUFFER_BIT);
-        glUseProgram(program);
+        shader.use();
 
-        glUniform1f(locationAspect, aspect);
-        glUniform3fv(locationCamPos, 1, &cam.getPos()[0]);
-
+        shader.loadFloat(locationAspect, aspect);
+        shader.loadVector(locationCamPos, cam.getPos());
+        shader.loadMatrix4(locationView, cam.getViewMat());
         glBindVertexArray(vao);
         glDrawArrays(GL_TRIANGLES, 0, 6);
         glUseProgram(0);
@@ -165,7 +136,6 @@ int main(int argc, char** argv){
 
     glDeleteBuffers(1, &vbo);
     glDeleteVertexArrays(1, &vao);
-    glDeleteProgram(program);
 
     glfwTerminate();
     return 0;
